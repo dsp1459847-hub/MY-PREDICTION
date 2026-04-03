@@ -7,7 +7,7 @@ import time
 # पेज कॉन्फ़िगरेशन
 st.set_page_config(page_title="Number Prediction AI", layout="wide")
 
-st.title("🎯 AI Number Guessing App (00-99)")
+st.title("🎯 AI Number Guessing App (0-99)")
 st.write("अपनी 3-5 साल की एक्सेल फाइल अपलोड करें और अगली संभावित संख्या का अनुमान लगाएं।")
 
 # साइडबार - वॉलेट और लॉगिन (सिम्युलेटेड)
@@ -30,7 +30,7 @@ if uploaded_file:
         st.write("डेटा की झलक:", df.head())
 
         # मान लें कि आपकी संख्याएं 'Number' नामक कॉलम में हैं
-        column_name = st.selectbox("उस कॉलम को चुनें जिसमें नंबर्स (00-99) हैं:", df.columns)
+        column_name = st.selectbox("उस कॉलम को चुनें जिसमें नंबर्स (0-99) हैं:", df.columns)
 
         if st.button("🔮 प्रेडिक्शन करें (10 Credits कटेंगे)"):
             if wallet_balance >= 10:
