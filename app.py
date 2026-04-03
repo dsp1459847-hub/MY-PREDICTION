@@ -2,67 +2,73 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+import time
 
-# डेटा तैयार करने का एडवांस फंक्शन
-def prepare_advanced_data(df, date_col, num_col, shift_col):
-    df[date_col] = pd.to_datetime(df[date_col])
-    df = df.sort_values([date_col, shift_col]) # तारीख और शिफ्ट के अनुसार सॉर्ट
-    
-    # फीचर्स: दिन, शिफ्ट, और पिछले 3 नंबर्स
-    df['day_of_week'] = df[date_col].dt.dayofweek
-    # शिफ्ट को नंबर में बदलना (e.g., Morning=0, Evening=1)
-    df['shift_id'] = pd.factorize(df[shift_col])[0]
-    
-    window = 3
-    X, y = [], []
-    nums = df[num_col].values
-    shifts = df['shift_id'].values
-    days = df['day_of_week'].values
-    
-    for i in range(window, len(df)):
-        # फीचर: [पिछला नंबर 1, पिछला नंबर 2, पिछला नंबर 3, आज का दिन, आज की शिफ्ट]
-        features = list(nums[i-window:i]) + [days[i], shifts[i]]
-        X.append(features)
-        y.append(nums[i])
-        
-    return np.array(X), np.array(y), nums, days, df[shift_col].unique()
+# पेज कॉन्फ़िगरेशन
+st.set_page_config(page_title="Number Prediction AI", layout="wide")
 
-st.title("🎯 AI Multi-Shift Predictor")
+st.title("🎯 AI Number Guessing App (00-99)")
+st.write("अपनी 3-5 साल की एक्सेल फाइल अपलोड करें और अगली संभावित संख्या का अनुमान लगाएं।")
 
-uploaded_file = st.file_uploader("अपनी Excel/CSV फाइल अपलोड करें", type=['xlsx', 'csv'])
+# साइडबार - वॉलेट और लॉगिन (सिम्युलेटेड)
+st.sidebar.header("👤 यूजर प्रोफाइल")
+st.sidebar.info("लॉगिन: +91-XXXXX-XXXXX")
+wallet_balance = st.sidebar.number_input("वॉलेट बैलेंस (Credits)", value=100)
+
+# फाइल अपलोडर
+uploaded_file = st.file_uploader("एक्सेल शीट अपलोड करें (CSV या XLSX)", type=['csv', 'xlsx'])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
-    
-    col1, col2, col3 = st.columns(3)
-    date_col = col1.selectbox("Date Column:", df.columns)
-    shift_col = col2.selectbox("Shift/Time Column:", df.columns)
-    num_col = col3.selectbox("Number Column:", df.columns)
-    
-    target_shift = st.selectbox("किस शिफ्ट के लिए प्रेडिक्शन चाहिए?", df[shift_col].unique())
+    # डेटा लोड करना
+    try:
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+        
+        st.success("डेटा सफलतापूर्वक लोड हो गया!")
+        st.write("डेटा की झलक:", df.head())
 
-    if st.button("🔮 Analyze Shift Patterns"):
-        X, y, nums, days, shift_names = prepare_advanced_data(df, date_col, num_col, shift_col)
-        shift_id = list(shift_names).index(target_shift)
-        
-        model = RandomForestClassifier(n_estimators=200, random_state=42)
-        model.fit(X, y)
-        
-        # अगली शिफ्ट के लिए डेटा (कल का दिन और चुनी हुई शिफ्ट)
-        next_day = (days[-1] + 1) % 7
-        last_features = list(nums[-3:]) + [next_day, shift_id]
-        
-        probs = model.predict_proba([last_features])[0]
-        top_3_indices = np.argsort(probs)[-3:][::-1]
-        
-        st.divider()
-        st.subheader(f"✅ {target_shift} के लिए टॉप 3 नंबर:")
-        
-        res_cols = st.columns(3)
-        for i in range(3):
-            num = model.classes_[top_3_indices[i]]
-            prob = probs[top_3_indices[i]] * 100
-            res_cols[i].metric(f"Rank {i+1}", f"{num:02d}", f"{prob:.1f}% Match")
+        # मान लें कि आपकी संख्याएं 'Number' नामक कॉलम में हैं
+        column_name = st.selectbox("उस कॉलम को चुनें जिसमें नंबर्स (00-99) हैं:", df.columns)
 
-        st.info(f"नोट: यह प्रेडिक्शन विशेष रूप से '{target_shift}' के ऐतिहासिक डेटा पर आधारित है।")
-      
+        if st.button("🔮 प्रेडिक्शन करें (10 Credits कटेंगे)"):
+            if wallet_balance >= 10:
+                with st.spinner('एआई डेटा पैटर्न को समझ रहा है...'):
+                    
+                    # डेटा प्री-प्रोसेसिंग (Lag Features बनाना)
+                    data = df[column_name].values
+                    X, y = [], []
+                    # पिछले 5 नंबर्स के आधार पर अगला नंबर सीखना
+                    window_size = 5 
+                    for i in range(len(data) - window_size):
+                        X.append(data[i:i + window_size])
+                        y.append(data[i + window_size])
+                    
+                    X = np.array(X)
+                    y = np.array(y)
+
+                    # मॉडल ट्रेनिंग (Random Forest)
+                    model = RandomForestClassifier(n_estimators=100)
+                    model.fit(X, y)
+
+                    # अगली संख्या की भविष्यवाणी
+                    last_sequence = data[-window_size:].reshape(1, -1)
+                    prediction = model.predict(last_sequence)[0]
+                    
+                    time.sleep(2) # थोड़ा प्रभाव डालने के लिए
+                    st.sidebar.warning(f"नया वॉलेट बैलेंस: {wallet_balance - 10}")
+                    
+                    st.balloons()
+                    st.markdown(f"""
+                    <div style="text-align: center; border: 5px solid #4CAF50; padding: 20px; border-radius: 10px;">
+                        <h1 style="color: #4CAF50;">अगली संभावित संख्या:</h1>
+                        <h1 style="font-size: 100px; margin: 0;">{prediction:02d}</h1>
+                    </div>
+                    """, unsafe_allow_status=True)
+            else:
+                st.error("वॉलेट में पर्याप्त क्रेडिट नहीं है! कृपया रिचार्ज करें।")
+
+    except Exception as e:
+        st.error(f"त्रुटि: {e}. कृपया सुनिश्चित करें कि एक्सेल में सही डेटा है।")
+        
