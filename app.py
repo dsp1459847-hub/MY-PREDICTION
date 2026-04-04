@@ -2,73 +2,106 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-import time
 
-# पेज कॉन्फ़िगरेशन
-st.set_page_config(page_title="Number Prediction AI", layout="wide")
+# डेटा क्लीनिंग फंक्शन: सिर्फ 00-99 के नंबर्स को प्रोसेस करेगा
+def clean_and_prepare_data(df, shift_columns):
+    all_data = []
+    
+    for index, row in df.iterrows():
+        # मान लें कि B1 कॉलम का नाम 'date' है
+        try:
+            current_date = pd.to_datetime(row.iloc[1]) # B1 कॉलम (Index 1)
+            day_of_week = current_date.dayofweek
+            
+            for shift_name in shift_columns:
+                val = str(row[shift_name]).strip()
+                
+                # टेक्स्ट (XX), खाली सेल या अन्य शब्दों को हटाना
+                if val.isdigit():
+                    num = int(val)
+                    if 0 <= num <= 99: # 00 से 99 की रेंज
+                        all_data.append({
+                            'date': current_date,
+                            'day_of_week': day_of_week,
+                            'shift': shift_name,
+                            'number': num
+                        })
+        except:
+            continue
+            
+    clean_df = pd.DataFrame(all_data)
+    if not clean_df.empty:
+        clean_df = clean_df.sort_values(['date', 'shift'])
+    return clean_df
 
-st.title("🎯 AI Number Guessing App (0-99)")
-st.write("अपनी 3-5 साल की एक्सेल फाइल अपलोड करें और अगली संभावित संख्या का अनुमान लगाएं।")
+# ट्रेनिंग और टॉप 3 प्रेडिक्शन
+def train_and_predict(clean_df, target_shift):
+    shift_list = list(clean_df['shift'].unique())
+    clean_df['shift_id'] = clean_df['shift'].apply(lambda x: shift_list.index(x))
+    
+    window = 5 
+    X, y = [], []
+    nums = clean_df['number'].values
+    days = clean_df['day_of_week'].values
+    shifts = clean_df['shift_id'].values
+    
+    for i in range(window, len(clean_df)):
+        features = list(nums[i-window:i]) + [days[i], shifts[i]]
+        X.append(features)
+        y.append(nums[i])
+        
+    model = RandomForestClassifier(n_estimators=300, random_state=42)
+    model.fit(X, y)
+    
+    target_shift_id = shift_list.index(target_shift)
+    # आज का दिन या कल का दिन लॉजिक
+    next_day = days[-1] 
+    last_features = list(nums[-window:]) + [next_day, target_shift_id]
+    
+    probs = model.predict_proba([last_features])[0]
+    top_3_indices = np.argsort(probs)[-3:][::-1]
+    
+    predictions = []
+    for idx in top_3_indices:
+        predictions.append({
+            'number': model.classes_[idx],
+            'prob': probs[idx] * 100
+        })
+    return predictions
 
-# साइडबार - वॉलेट और लॉगिन (सिम्युलेटेड)
-st.sidebar.header("👤 यूजर प्रोफाइल")
-st.sidebar.info("लॉगिन: +91-XXXXX-XXXXX")
-wallet_balance = st.sidebar.number_input("वॉलेट बैलेंस (Credits)", value=100)
+# --- UI Setup ---
+st.set_page_config(page_title="00-99 Number Predictor", layout="wide")
+st.title("🎯 AI Number Guessing (00-99 Range)")
+st.write("A1: Serial, B1: Date, C1-I1: Shifts (09:00 AM to 08:00 AM)")
 
-# फाइल अपलोडर
-uploaded_file = st.file_uploader("एक्सेल शीट अपलोड करें (CSV या XLSX)", type=['csv', 'xlsx'])
+uploaded_file = st.file_uploader("अपनी Excel फाइल यहाँ डालें", type=['xlsx'])
 
 if uploaded_file:
-    # डेटा लोड करना
-    try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+    df = pd.read_excel(uploaded_file)
+    # कॉलम्स को C1 से I1 (Index 2 से 8) के रूप में लेना
+    shift_cols = df.columns[2:9]
+    
+    st.sidebar.success(f"कुल {len(shift_cols)} शिफ्ट्स लोड हुईं")
+    target_shift = st.sidebar.selectbox("अपनी शिफ्ट चुनें:", shift_cols)
+
+    if st.button("🔮 प्रेडिक्शन (00-99) शुरू करें"):
+        clean_df = clean_and_prepare_data(df, shift_cols)
+        
+        if len(clean_df) < 10:
+            st.error("डेटा बहुत कम है! कम से कम 10-15 पिछले नंबर्स होने चाहिए।")
         else:
-            df = pd.read_excel(uploaded_file)
-        
-        st.success("डेटा सफलतापूर्वक लोड हो गया!")
-        st.write("डेटा की झलक:", df.head())
-
-        # मान लें कि आपकी संख्याएं 'Number' नामक कॉलम में हैं
-        column_name = st.selectbox("उस कॉलम को चुनें जिसमें नंबर्स (0-99) हैं:", df.columns)
-
-        if st.button("🔮 प्रेडिक्शन करें (10 Credits कटेंगे)"):
-            if wallet_balance >= 10:
-                with st.spinner('एआई डेटा पैटर्न को समझ रहा है...'):
-                    
-                    # डेटा प्री-प्रोसेसिंग (Lag Features बनाना)
-                    data = df[column_name].values
-                    X, y = [], []
-                    # पिछले 5 नंबर्स के आधार पर अगला नंबर सीखना
-                    window_size = 5 
-                    for i in range(len(data) - window_size):
-                        X.append(data[i:i + window_size])
-                        y.append(data[i + window_size])
-                    
-                    X = np.array(X)
-                    y = np.array(y)
-
-                    # मॉडल ट्रेनिंग (Random Forest)
-                    model = RandomForestClassifier(n_estimators=100)
-                    model.fit(X, y)
-
-                    # अगली संख्या की भविष्यवाणी
-                    last_sequence = data[-window_size:].reshape(1, -1)
-                    prediction = model.predict(last_sequence)[0]
-                    
-                    time.sleep(2) # थोड़ा प्रभाव डालने के लिए
-                    st.sidebar.warning(f"नया वॉलेट बैलेंस: {wallet_balance - 10}")
-                    
-                    st.balloons()
+            results = train_and_predict(clean_df, target_shift)
+            
+            st.subheader(f"📊 {target_shift} के लिए संभावित नंबर:")
+            cols = st.columns(3)
+            for i, res in enumerate(results):
+                with cols[i]:
+                    # यहाँ :02d सुनिश्चित करता है कि 5 की जगह 05 दिखे
                     st.markdown(f"""
-                    <div style="text-align: center; border: 5px solid #4CAF50; padding: 20px; border-radius: 10px;">
-                        <h1 style="color: #4CAF50;">अगली संभावित संख्या:</h1>
-                        <h1 style="font-size: 100px; margin: 0;">{prediction:02d}</h1>
+                    <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; text-align:center;">
+                        <h2 style="color:#ff4b4b;">RANK {i+1}</h2>
+                        <h1 style="font-size:60px;">{res['number']:02d}</h1>
+                        <p>संभावना: {res['prob']:.1f}%</p>
                     </div>
-                    """, unsafe_allow_status=True)
-            else:
-                st.error("वॉलेट में पर्याप्त क्रेडिट नहीं है! कृपया रिचार्ज करें।")
-
-    except Exception as e:
-        st.error(f"त्रुटि: {e}. कृपया सुनिश्चित करें कि एक्सेल में सही डेटा है।")
-        
+                    """, unsafe_allow_html=True)
+                    
